@@ -1,4 +1,5 @@
 #Credits; https://github.com/reverse-hash/bitcoin-full-node-with-docker/blob/main/tor/Dockerfile
+#TOR_VERSION=$(curl -s https://gitlab.torproject.org/tpo/applications/tor-browser-build/-/raw/maint-12.0/projects/browser/Bundle-Data/Docs/ChangeLog.txt | grep 'Tor Browser [0-9][0-9].[0-9].' | head -1 | grep -oP '(?<=Tor Browser ).*(?=-)' | xargs) \
 FROM alpine:latest AS build
 ARG TOR_VERSION
 ARG TOR_PLATFORM
