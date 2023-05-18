@@ -1,30 +1,47 @@
-#Credits; https://github.com/reverse-hash/bitcoin-full-node-with-docker/blob/main/tor/Dockerfile
-#TOR_VERSION=$(curl -s https://gitlab.torproject.org/tpo/applications/tor-browser-build/-/raw/maint-12.0/projects/browser/Bundle-Data/Docs/ChangeLog.txt | grep 'Tor Browser [0-9][0-9].[0-9].' | head -1 | grep -oP '(?<=Tor Browser ).*(?=-)' | xargs) \
-FROM alpine:latest AS build
+# Largely based on https://raw.githubusercontent.com/cmehay/docker-tor-hidden-service/master/Dockerfile
+FROM python:3.10-alpine
 ARG TOR_VERSION
-ARG TOR_PLATFORM
-RUN apk add --update --no-cache dirmngr gpg gpg-agent wget \
-  && cd /tmp \
-  && wget https://www.torproject.org/dist/torbrowser/${TOR_VERSION}/tor-expert-bundle-${TOR_VERSION}-${TOR_PLATFORM}.tar.gz.asc \
-  && wget https://www.torproject.org/dist/torbrowser/${TOR_VERSION}/tor-expert-bundle-${TOR_VERSION}-${TOR_PLATFORM}.tar.gz \
-  && gpg --auto-key-locate nodefault,wkd --locate-keys torbrowser@torproject.org \
-  && gpg --verify tor-expert-bundle-${TOR_VERSION}-${TOR_PLATFORM}.tar.gz.asc \
-  && if [ "1" -lt $(gpg --verify SHA256SUMS.asc 2>&1 >/dev/null | grep 'Good Signature' -c) ]; then exit 1; fi \
-  && tar -xzf *.tar.gz -C . \
-  && rm -rf tor/debug tor/data tor/pluggable_transports *.tar.gz \
-  && chmod -R 755 tor \
-  && apk del dirmngr gpg gpg-agent wget
+ARG TORSOCKS_VERSION
+ENV POETRY_VIRTUALENVS_CREATE=false
 
+RUN apk add --no-cache git bind-tools cargo libevent-dev openssl-dev gnupg gcc make automake ca-certificates autoconf musl-dev coreutils libffi-dev zlib-dev && \
+    mkdir -p /usr/local/src/ /var/lib/tor/ && \
+    git clone https://git.torproject.org/tor.git /usr/local/src/tor && \
+    cd /usr/local/src/tor && \
+    TOR_VERSION=${tor_version=$(git tag | grep -oE '[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -1)} && \
+    git checkout tor-$TOR_VERSION && \
+    ./autogen.sh && \
+    ./configure \
+    --disable-asciidoc \
+    --sysconfdir=/etc \
+    --disable-unittests && \
+    make && make install && \
+    cd .. && \
+    rm -rf tor && \
+    pip3 install --upgrade pip poetry && \
+    apk del git libevent-dev openssl-dev gnupg cargo make automake autoconf musl-dev coreutils libffi-dev && \
+    apk add --no-cache libevent openssl
 
-FROM debian:stable-slim
-COPY --from=build /tmp/tor /opt/tor
-ENV PATH=$PATH:/opt/tor
-ENV LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/opt/tor
+RUN apk add --no-cache git gcc make automake autoconf musl-dev libtool && \
+    git clone https://git.torproject.org/torsocks.git /usr/local/src/torsocks && \
+    cd /usr/local/src/torsocks && \
+    TORSOCKS_VERSION=${torsocks_version=$(git tag | grep -oE 'v[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -1)} && \
+    git checkout $TORSOCKS_VERSION && \
+    ./autogen.sh && \
+    ./configure && \
+    make && make install && \
+    cd .. && \
+    rm -rf torsocks && \
+    apk del git gcc make automake autoconf musl-dev libtool
 
-RUN adduser --disabled-password tor
+ARG GROUP_ID
+
+ENV PATH=$PATH:/var/lib/tor
+ENV LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/var/lib/tor
+
+RUN addgroup --gid ${GROUP_ID} tor \
+  && adduser --disabled-password --gecos "" --ingroup tor tor
 
 USER tor
-
-COPY --chown=tor:tor ./torrc.default /home/tor/torrc.default
 
 CMD tor -f ~/torrc.default
